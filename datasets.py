@@ -9,15 +9,20 @@ import pickle
 import zstandard as zstd
 import io
 import multiprocessing
+import re
 
 class LargeTextDataset(ABC):
   """Abstract class for handling large text datasets."""
   
-  def __init__(self, folder_path, saved_rel_path='samples.jsonl'):
+  def __init__(self, folder_path, saved_rel_path='samples.jsonl', file_regex_filter=r'.*\.jsonl\.zst$'):
     self.folder_path = folder_path
     self.stats_dict_path = os.path.join(folder_path, '.stats_dict.pkl')
-    os.makedirs(os.path.join(folder_path, 'outputs'))
+    os.makedirs(os.path.join(folder_path, 'outputs'), exist_ok=True)
     self.saved_path = os.path.join(folder_path, 'outputs', saved_rel_path)
+    self.all_files = [f for f in os.listdir(self.folder_path) if os.path.isfile(os.path.join(self.folder_path, f)) and not f.endswith('.pkl') and bool(re.fullmatch(file_regex_filter, f))]
+    print([bool(re.fullmatch(file_regex_filter, f)) for f in os.listdir(self.folder_path)])
+    print(os.listdir(self.folder_path))
+    print(f'Found {self.all_files} files in the folder.')
 
     self.stats_dict = {}
     if os.path.exists(self.stats_dict_path):
@@ -38,42 +43,57 @@ class LargeTextDataset(ABC):
               return io.BytesIO(decompressed_data)
       else:
           return open(filepath, 'rb')
-        
-  @staticmethod
-  def _search_newline_pos(filepath: str):
-    """Given a text file, find all newline char positions.
+  
+  def _search_newline_pos(self, filepath: str):
+      """Find all newline char positions in .json or .json.zst files."""
+      newline_positions = []
+      with self.get_file_stream(filepath) as f:
+          file_size = f.seek(0, io.SEEK_END)
+          f.seek(0)
+          current_pos = 0
+          with tqdm(total=file_size, unit='B', unit_scale=True, desc="Processing") as pbar:
+              while chunk := f.read(1024 * 1024 * 10):  # Read 10MB at a time
+                  newline_positions.extend([i + current_pos for i, byte in enumerate(chunk) if byte == ord(b'\n')])
+                  chunk_size = len(chunk)
+                  current_pos += chunk_size
+                  pbar.update(chunk_size)
+      return newline_positions
+  
+  # @staticmethod
+  # def _search_newline_pos(filepath: str):
+  #   """Given a text file, find all newline char positions.
 
-    This essentially implements `wc -l` but returns the positions.
-    This is useful since once we know all where the `\n` positions
-    are, we can then use them *uniformly* sample the lines in the 
-    file with O(1) space instead of O(n).
+  #   This essentially implements `wc -l` but returns the positions.
+  #   This is useful since once we know all where the `\n` positions
+  #   are, we can then use them *uniformly* sample the lines in the 
+  #   file with O(1) space instead of O(n).
 
-    The peak mem usage of this function is dominated by the length
-    of the result;  the file is not loaded into the memory.
-    """
+  #   The peak mem usage of this function is dominated by the length
+  #   of the result;  the file is not loaded into the memory.
+  #   """
 
-    newline_positions = []
-    with open(filepath, 'r+b') as f:
-      # Memory-map the file, size 0 means the whole file
-      with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-        file_size = mm.size()
-        current_pos = 0
-        # Initialize tqdm with total file size
-        with tqdm(total=file_size, unit='B', unit_scale=True,
-                  desc="Processing") as pbar:
-          while True:
-            pos = mm.find(b'\n', current_pos)
-            if pos == -1:
-              # Update the progress bar to the end
-              pbar.update(file_size - current_pos)
-              break
-            newline_positions.append(pos)
-            # Calculate the number of bytes processed since last update
-            bytes_processed = pos - current_pos + 1  # +1 to move past the '\n'
-            pbar.update(bytes_processed)
-            current_pos = pos + 1  # Move to the next byte after '\n'
+  #   newline_positions = []
+  #   with open(filepath, 'r+b') as f:
+  #     # Memory-map the file, size 0 means the whole file
+  #     with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+  #       file_size = mm.size()
+  #       current_pos = 0
+  #       # Initialize tqdm with total file size
+  #       with tqdm(total=file_size, unit='B', unit_scale=True,
+  #                 desc="Processing") as pbar:
+  #         while True:
+  #           pos = mm.find(b'\n', current_pos)
+  #           if pos == -1:
+  #             # Update the progress bar to the end
+  #             pbar.update(file_size - current_pos)
+  #             break
+  #           newline_positions.append(pos)
+  #           # Calculate the number of bytes processed since last update
+  #           bytes_processed = pos - current_pos + 1  # +1 to move past the '\n'
+  #           pbar.update(bytes_processed)
+  #           current_pos = pos + 1  # Move to the next byte after '\n'
 
-    return newline_positions
+  #   return newline_positions
 
   def get_line(self, file_name: str, line_number: int):
       """
@@ -96,19 +116,16 @@ class LargeTextDataset(ABC):
       keys of file_names, values of a list of offsets of newlines. Note that the set of shard paths
       are different from the set of keys of loaded dictionary, if that case, then recompute and save the dictionary. 
     """
-    
-    # List all files in the folder excluding .pkl files
-    all_files = [f for f in os.listdir(self.folder_path) if os.path.isfile(os.path.join(self.folder_path, f)) and not f.endswith('.pkl')]
 
     # Remove entries from stats_dict that are no longer present in the folder
-    files_to_remove = [key for key in self.stats_dict.keys() if key not in all_files]
+    files_to_remove = [key for key in self.stats_dict.keys() if key not in self.all_files]
     for file_name in files_to_remove:
         del self.stats_dict[file_name]
 
     self.total_lines = 0
     self.file_weights, self.file_lengths = {}, {}
     # Process any files that are not in stats_dict
-    for file_name in all_files:
+    for file_name in self.all_files:
       if file_name not in self.stats_dict:
         file_path = os.path.join(self.folder_path, file_name)
         newline_positions = self._search_newline_pos(file_path)
