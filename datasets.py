@@ -115,6 +115,13 @@ class LargeTextDataset(ABC):
           else:
               line = f.readline()
       return line.decode('utf-8').rstrip('\n')
+    
+  def _process_file(self, file_name):
+    if file_name not in self.stats_dict:
+        file_path = os.path.join(self.folder_path, file_name)
+        newline_positions, category_line_numbers = self._search_newline_positions(file_path)
+        return file_name, newline_positions, category_line_numbers
+    return file_name, None, None
   
   def _preprocess_files(self):
     """
@@ -126,19 +133,28 @@ class LargeTextDataset(ABC):
     # Remove entries from stats_dict that are no longer present in the folder
     files_to_remove = [key for key in self.stats_dict.keys() if key not in self.all_files]
     for file_name in files_to_remove:
-        del self.stats_dict[file_name]
+      del self.stats_dict[file_name]
+        
+    # Process files in parallel
+    with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+      results = pool.map(self._process_file, self.all_files)
 
     self.total_lines = 0
     self.file_weights, self.file_lengths = {}, {}
     self.category_total_lines = {}
     self.category_file_weights, self.category_file_lengths = {}, {}
-        
+    
     # Process any files that are not in stats_dict
-    for file_name in self.all_files:
-      if file_name not in self.stats_dict:
-        file_path = os.path.join(self.folder_path, file_name)
-        newline_positions, category_line_numbers = self._search_newline_positions(file_path)
-        self.stats_dict[file_name], self.category_stats_dict[file_name] = newline_positions, category_line_numbers  
+
+    # for file_name in self.all_files:
+      # if file_name not in self.stats_dict:
+      #   file_path = os.path.join(self.folder_path, file_name)
+      #   newline_positions, category_line_numbers = self._search_newline_positions(file_path)
+      #   self.stats_dict[file_name], self.category_stats_dict[file_name] = newline_positions, category_line_numbers  
+    for file_name, newline_positions, category_line_numbers in results:
+      if newline_positions is not None and category_line_numbers is not None:
+        self.stats_dict[file_name] = newline_positions
+        self.category_stats_dict[file_name] = category_line_numbers
 
       num_lines = len(self.stats_dict[file_name])
       self.file_weights[file_name], self.file_lengths[file_name] = num_lines, num_lines
