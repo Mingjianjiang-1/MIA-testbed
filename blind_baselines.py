@@ -12,6 +12,16 @@ from tqdm import tqdm
 
 class MembershipClassifier(ABC):
     @abstractmethod
+    def train(self, member_dataloader: DataLoader, non_member_dataloader: DataLoader):
+        """
+        Train the classifier using the given data.
+        
+        :param member_dataloader: A PyTorch DataLoader of member data
+        :param non_member_dataloader: A PyTorch DataLoader of non-member data
+        """
+        pass
+    
+    @abstractmethod
     def predict(self, data: np.ndarray) -> np.ndarray:
         """
         Predict the scores for the given batch of data.
@@ -26,11 +36,14 @@ class YearKeywordClassifier(MembershipClassifier):
         self.year_keywords = year_keywords
         self.pattern = re.compile(r'\b(' + '|'.join(map(re.escape, year_keywords)) + r')\b')
 
+    def train(self, member_dataloader: DataLoader, non_member_dataloader: DataLoader):
+        pass
+    
     def predict(self, data: np.ndarray) -> np.ndarray:
         return np.array([0 if self.pattern.search(text) else 1 for text in data])
 
 
-class BagOfWordsClassifier:
+class BagOfWordsClassifier(MembershipClassifier):
     def __init__(self, max_features=5000):
         self.pipeline = Pipeline([
             ('vectorizer', CountVectorizer(max_features=max_features)),
@@ -44,13 +57,13 @@ class BagOfWordsClassifier:
         
         # Process member data
         for batch in tqdm(member_dataloader, desc="Processing member data"):
-            X.extend(batch['text'])
-            y.extend([1] * len(batch['text']))  # 1 for member
+            X.extend(batch)
+            y.extend([1] * len(batch))  # 1 for member
         
         # Process non-member data
         for batch in tqdm(non_member_dataloader, desc="Processing non-member data"):
-            X.extend(batch['text'])
-            y.extend([0] * len(batch['text']))  # 0 for non-member
+            X.extend(batch)
+            y.extend([0] * len(batch))  # 0 for non-member
         
         # Fit the pipeline
         self.pipeline.fit(X, y)
@@ -61,6 +74,6 @@ class BagOfWordsClassifier:
         # We take the second column (index 1) which represents the probability of being a member
         return self.pipeline.predict_proba(data)[:, 1]
 
-# Usage example
-bow_classifier = BagOfWordsClassifier(max_features=5000)
-bow_classifier.train(member_dataloader, non_member_dataloader)
+# # Usage example
+# bow_classifier = BagOfWordsClassifier(max_features=5000)
+# bow_classifier.train(member_dataloader, non_member_dataloader)
