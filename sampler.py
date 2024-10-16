@@ -11,10 +11,14 @@ import io
 import multiprocessing
 import re
 import json
+from collections import defaultdict
+from functools import partial
 
 class Sampler:
-    def __init__(self, dataset):
+    def __init__(self, dataset, saved_folder='outputs', saved_name='samples.jsonl'):
         self.dataset = dataset
+        os.makedirs(os.path.join(dataset.folder_path, saved_folder), exist_ok=True)
+        self.saved_path = os.path.join(dataset.folder_path, saved_folder, saved_name)
 
     # def sample_line_with_seed(self, seed, category=None):
     #     rng = random.Random(seed)
@@ -67,7 +71,6 @@ class Sampler:
     #     return sampled_lines
 
     def sample_lines_with_seed(self, seed, sample_num, category=None):
-        
         rng = random.Random(seed)
         
         assert category is None or category in self.dataset.category_file_weights, f'Category {category} not found in dataset.'
@@ -77,10 +80,10 @@ class Sampler:
         else:
             file_weights, file_lengths = self.dataset.category_file_weights[category], self.dataset.category_file_lengths[category]
 
-        sampled_lines = []
         sampled_positions = set()  # To keep track of already sampled positions
+        lines_to_fetch = defaultdict(list)  # Dictionary to store file names and line numbers
 
-        while len(sampled_lines) < sample_num:
+        while len(sampled_positions) < sample_num:
             file_name = rng.choices(
                 population=list(file_weights.keys()),
                 weights=list(file_weights.values()),
@@ -94,13 +97,18 @@ class Sampler:
             position = (file_name, line_number)
             if position not in sampled_positions:
                 sampled_positions.add(position)
-                sampled_lines.append(self.dataset.get_line(file_name, line_number, category=category))
+                lines_to_fetch[file_name].append(line_number)
+
+        sampled_lines = []
+        for file_name, line_numbers in lines_to_fetch.items():
+            lines = self.dataset.get_lines(file_name, line_numbers, category=category)
+            sampled_lines.extend(lines)
 
         return sampled_lines
 
     def random_sample_new(self, num_samples, category=None, saved=False, num_workers=None, seed=42):
         if num_workers is None:
-            num_workers = multiprocessing.cpu_count()
+            num_workers = max(multiprocessing.cpu_count() - 2, 1)
         print(f'Using {num_workers} workers for sampling.')
         
         rng = random.Random(seed)
@@ -121,7 +129,7 @@ class Sampler:
             sampled_lines = [line for sublist in sampled_lines_nested for line in sublist]  # Flatten the list
             
         if saved:
-            with open(self.dataset.saved_path, 'w') as f:
+            with open(self.saved_path, 'w') as f:
                 for line in sampled_lines:
                     f.write(line + '\n')
 
