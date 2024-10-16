@@ -11,8 +11,27 @@ import io
 import multiprocessing
 import re
 import json
-from abc_class import LargeDataset
 from preprocessors import *
+
+class LargeDataset(ABC):
+    def __init__(self, folder_path, saved_rel_path='samples.jsonl', file_regex_filter=r'.*\.jsonl\.zst$'):
+        self.folder_path = folder_path
+        os.makedirs(os.path.join(folder_path, 'outputs'), exist_ok=True)
+        self.saved_path = os.path.join(folder_path, 'outputs', saved_rel_path)
+        
+        self.preprocessor = self._create_preprocessor(folder_path, file_regex_filter)
+        self.total_lines, self.file_weights, self.file_lengths, self.category_total_lines, self.category_file_weights, self.category_file_lengths = self.preprocessor.preprocess_files()
+
+    @abstractmethod
+    def _create_preprocessor(self, folder_path, file_regex_filter):
+        pass
+
+    @abstractmethod
+    def get_line(self, file_name: str, line_number: int, category=None):
+        pass
+
+    def get_line_start_offset(self, file_name: str, line_number: int):
+        return 0 if line_number == 0 else self.preprocessor.stats_dict[file_name][line_number - 1] + 1
 
 class PileDataset(LargeDataset):
     def _create_preprocessor(self, folder_path, file_regex_filter):
