@@ -5,6 +5,8 @@ from tqdm import tqdm
 from blind_baselines import MembershipClassifier, YearKeywordClassifier, BagOfWordsClassifier
 from torch.utils.data import Dataset, DataLoader, random_split
 from dummy import JSONLDummyDataset, collate_fn
+from sampler import Sampler
+from large_datasets import PileDataset
 import torch
 
 def create_dataloaders(member_path, non_member_path, batch_size=32, num_workers=4, test_split=0.2, seed=42):
@@ -82,25 +84,40 @@ def train_classifiers(classifiers, train_member_dataloader, train_non_member_dat
         classifier.train(train_member_dataloader, train_non_member_dataloader)
         print(f"{classifier.__class__.__name__} completed training.")
 
-train_member_dataloader, train_non_member_dataloader, \
-test_member_dataloader, test_non_member_dataloader = create_dataloaders(
-    "test_data/test10k-pile-train-00.jsonl",
-    "test_data/test10k-pile-val.jsonl"
-)
+def sample_from_pile_data(sample_num):
+    # member_dataset = PileDataset("data/pile", file_regex_filter=r'train/[^/]+\.jsonl\.zst$')
+    non_member_dataloader = PileDataset("data/pile", file_regex_filter=r'^[^/]+\.jsonl\.zst$')
 
-# Initialize classifiers
-classifiers = [
-    YearKeywordClassifier(["2023", "2024"]),
-    BagOfWordsClassifier(max_features=5000)
-]
+    member_sampler = Sampler(member_dataset)
+    non_member_sampler = Sampler(non_member_dataset)
 
-# Train classifiers
-train_classifiers(classifiers, train_member_dataloader, train_non_member_dataloader)
+    member_sampler.random_sample_new(sample_num, saved=True, num_workers=8, seed=42, saved_name='member_samples.jsonl')
+    non_member_sampler.random_sample_new(sample_num, saved=True, num_workers=8, seed=42, saved_name='non_member_samples.jsonl')
 
-# Evaluate on test set
-test_results = evaluate_classifiers(classifiers, test_member_dataloader, test_non_member_dataloader, "Test")
+def benchmark_blind_baselines():
+    train_member_dataloader, train_non_member_dataloader, \
+    test_member_dataloader, test_non_member_dataloader = create_dataloaders(
+        "test_data/test10k-pile-train-00.jsonl",
+        "test_data/test10k-pile-val.jsonl"
+    )
 
-# Print results
-print("\nTest Results:")
-for classifier_name, auroc in test_results:
-    print(f"{classifier_name} AUROC: {auroc:.4f}")
+    # Initialize classifiers
+    classifiers = [
+        YearKeywordClassifier(["2023", "2024"]),
+        BagOfWordsClassifier(max_features=5000)
+    ]
+
+    # Train classifiers
+    train_classifiers(classifiers, train_member_dataloader, train_non_member_dataloader)
+
+    # Evaluate on test set
+    test_results = evaluate_classifiers(classifiers, test_member_dataloader, test_non_member_dataloader, "Test")
+
+    # Print results
+    print("\nTest Results:")
+    for classifier_name, auroc in test_results:
+        print(f"{classifier_name} AUROC: {auroc:.4f}")
+
+if __name__ == "__main__":
+    # benchmark_blind_baselines()
+    sample_from_pile_data(20)

@@ -20,7 +20,8 @@ class Preprocessor(ABC):
         self.category_stats_dict_path = os.path.join(folder_path, f'.category_stats_dict_regex{file_regex_filter}.pkl')
         self.file_regex_filter = file_regex_filter
         self.all_files = [f for f in os.listdir(self.folder_path) if os.path.isfile(os.path.join(self.folder_path, f)) and not f.endswith('.pkl') and bool(re.fullmatch(file_regex_filter, f))]
-        
+        print(f"Found {len(self.all_files)} files in the folder.")
+        raise NotImplementedError("This method should be implemented in a subclass")
         self.stats_dict = {}
         self.category_stats_dict = {}
         self._load_stats()

@@ -15,10 +15,10 @@ from collections import defaultdict
 from functools import partial
 
 class Sampler:
-    def __init__(self, dataset, saved_folder='outputs', saved_name='samples.jsonl'):
+    def __init__(self, dataset, saved_folder='outputs'):
         self.dataset = dataset
         os.makedirs(os.path.join(dataset.folder_path, saved_folder), exist_ok=True)
-        self.saved_path = os.path.join(dataset.folder_path, saved_folder, saved_name)
+        self.saved_path = os.path.join(self.dataset.folder_path, saved_folder, saved_name)
 
     # def sample_line_with_seed(self, seed, category=None):
     #     rng = random.Random(seed)
@@ -106,11 +106,13 @@ class Sampler:
 
         return sampled_lines
 
-    def random_sample_new(self, num_samples, category=None, saved=False, num_workers=None, seed=42):
+    def random_sample_new(self, num_samples, category=None, saved=False, num_workers=None, seed=42, saved_name='samples.jsonl'):
         if num_workers is None:
             num_workers = max(multiprocessing.cpu_count() - 2, 1)
         print(f'Using {num_workers} workers for sampling.')
         
+        self.saved_path = os.path.join(self.dataset.folder_path, saved_folder, saved_name)
+
         rng = random.Random(seed)
         samples_per_worker = num_samples // num_workers
         remainder = num_samples % num_workers
