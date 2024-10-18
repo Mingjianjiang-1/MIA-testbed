@@ -11,6 +11,7 @@ import io
 import multiprocessing
 import re
 import json
+from typing import BinaryIO
 
 class Preprocessor(ABC):
     def __init__(self, folder_path, file_regex_filter=r'.*\.jsonl\.zst$'):
@@ -19,7 +20,8 @@ class Preprocessor(ABC):
         self.category_stats_dict_path = os.path.join(folder_path, f'.category_stats_dict_regex{file_regex_filter}.pkl')
         self.file_regex_filter = file_regex_filter
         self.all_files = [f for f in os.listdir(self.folder_path) if os.path.isfile(os.path.join(self.folder_path, f)) and not f.endswith('.pkl') and bool(re.fullmatch(file_regex_filter, f))]
-        
+        print(f"Found {len(self.all_files)} files in the folder.")
+        raise NotImplementedError("This method should be implemented in a subclass")
         self.stats_dict = {}
         self.category_stats_dict = {}
         self._load_stats()
@@ -33,7 +35,7 @@ class Preprocessor(ABC):
                 self.category_stats_dict = pickle.load(f)
     
     @staticmethod
-    def get_jsonl_file_stream(filepath: str):
+    def get_jsonl_file_stream(filepath: str) -> BinaryIO:
         if filepath.endswith('.zst'):
             with open(filepath, 'rb') as f:
                 dctx = zstd.ZstdDecompressor()
@@ -44,7 +46,7 @@ class Preprocessor(ABC):
 
     @staticmethod
     @abstractmethod
-    def get_file_stream(filepath: str):
+    def get_file_stream(filepath: str) -> BinaryIO:
         pass
     
     @staticmethod
@@ -69,7 +71,9 @@ class Preprocessor(ABC):
             del self.stats_dict[file_name]
             
         with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-            results = pool.map(self._process_file, self.all_files)
+            async_result = pool.map_async(self._process_file, self.all_files)
+            results = async_result.get()
+            # results = pool.map(self._process_file, self.all_files)
 
         total_lines = 0
         file_weights, file_lengths = {}, {}
@@ -113,7 +117,7 @@ class Preprocessor(ABC):
 
 class PilePreprocessor(Preprocessor):
     @staticmethod
-    def get_file_stream(filepath: str):
+    def get_file_stream(filepath: str) -> BinaryIO:
         return Preprocessor.get_jsonl_file_stream(filepath)
     
     @staticmethod
@@ -124,7 +128,7 @@ class PilePreprocessor(Preprocessor):
     def _search_newline_positions(self, filepath: str):
         newline_positions = []
         category_line_numbers = {}
-        with self.get_jsonl_file_stream(filepath) as f:
+        with self.get_file_stream(filepath) as f:
             file_size = f.seek(0, io.SEEK_END)
             f.seek(0)
             current_pos, line_number = 0, 0
